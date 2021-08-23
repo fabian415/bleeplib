@@ -32,8 +32,43 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvDevices"
         android:layout_below="@+id/llbtns"
-        android:layout_alignParentBottom="true"
+        android:layout_above="@id/lyButtons"
         android:layout_width="match_parent"
         android:layout_height="wrap_content" />
 
+    <LinearLayout
+        android:id="@+id/lyButtons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_marginTop="5dp"
+        android:gravity="bottom"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnPush1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="5dp"
+            android:layout_weight="1"
+            android:text="Image 1" />
+
+        <Button
+            android:id="@+id/btnPush2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="5dp"
+            android:layout_weight="1"
+            android:text="Image 2" />
+
+        <Button
+            android:id="@+id/btnPush3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="5dp"
+            android:layout_weight="1"
+            android:backgroundTint="@color/purple_200"
+            android:text="White" />
+
+    </LinearLayout>
 </RelativeLayout>

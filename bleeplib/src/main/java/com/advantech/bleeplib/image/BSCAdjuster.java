@@ -2,7 +2,22 @@ package com.advantech.bleeplib.image;
 
 import android.graphics.Bitmap;
 
+/**
+ * An utility class for pre-process image using BSC adjuster.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ */
 public class BSCAdjuster {
+
+    /**
+     * Adjust image using saturation, brightness, and contrast values.
+     *
+     * @param src
+     * @param saturation
+     * @param brightness
+     * @param contrast
+     */
     public static void transform(Bitmap src, double saturation, double brightness, double contrast) {
         // 調整各系數取值范圍
         saturation = (1.0 + saturation / 100.0);
@@ -26,7 +41,7 @@ public class BSCAdjuster {
                 tg = (inpixels[index] >> 8) & 0xff;
                 tb = inpixels[index] & 0xff;
                 // RGB轉換為HSL色彩空間
-                double[] hsl = rgb2hsl(new int[] { tr, tg, tb });
+                double[] hsl = rgb2hsl(new int[]{tr, tg, tb});
 
                 // 調整飽和度
                 hsl[1] = hsl[1] * saturation;
@@ -66,32 +81,26 @@ public class BSCAdjuster {
         setRGB(src, 0, 0, width, height, outpixels);
     }
 
-    public static int clamp(int value) {
+    private static int clamp(int value) {
         return value > 255 ? 255 : ((value < 0) ? 0 : value);
     }
 
     // 讀取像素數據
-    public static void getRGB(Bitmap image, int x, int y, int width, int height, int[] pixels) {
-//        image.get
-//        int type = image.getType();
-//        if (type == BufferedImage.TYPE_INT_ARGB || type == BufferedImage.TYPE_INT_RGB) {
-//            return (int[]) image.getRaster().getDataElements(x, y, width, height, pixels);
-//        } else {
-            image.getPixels(pixels, 0, width, x, y, width, height);
-//        }
+    private static void getRGB(Bitmap image, int x, int y, int width, int height, int[] pixels) {
+        image.getPixels(pixels, 0, width, x, y, width, height);
     }
 
     // 寫入像素數據
-    public static void setRGB(Bitmap image, int x, int y, int width, int height, int[] pixels) {
-//        int type = image.getType();
-//        if (type == BufferedImage.TYPE_INT_ARGB || type == BufferedImage.TYPE_INT_RGB) {
-//            image.getRaster().setDataElements(x, y, width, height, pixels);
-//        } else {
-            image.setPixels(pixels, 0, width, x, y, width, height);
-//        }
+    private static void setRGB(Bitmap image, int x, int y, int width, int height, int[] pixels) {
+        image.setPixels(pixels, 0, width, x, y, width, height);
     }
 
-    // RGB色彩空間轉換為HSL色彩空間
+    /**
+     * RGB to HSL.
+     *
+     * @param rgb
+     * @return
+     */
     public static double[] rgb2hsl(int[] rgb) {
         double max = Math.max(Math.max(rgb[0], rgb[1]), rgb[2]); // 0xdd = 221
         double delta = max - Math.min(Math.min(rgb[0], rgb[1]), rgb[2]); // 153
@@ -112,10 +121,15 @@ public class BSCAdjuster {
                 h += 360d;
             }
         }
-        return new double[] { h, s, l };
+        return new double[]{h, s, l};
     }
 
-    // HSL色彩空間轉換為RGB色彩空間
+    /**
+     * HSL to RGB.
+     *
+     * @param hsl
+     * @return
+     */
     public static int[] hsl2rgb(double[] hsl) {
         double h = hsl[0] / 360d;
         double s = hsl[1] / 100d;
@@ -126,7 +140,7 @@ public class BSCAdjuster {
 
         if (s > 0d) {
             if (h >= 1d) {
-                h = 0d;/* from w w w . j ava 2 s . co m */
+                h = 0d;
             }
 
             h = h * 6d;
@@ -167,11 +181,11 @@ public class BSCAdjuster {
                     g = a;
                     break;
             }
-            return new int[] { (int) Math.round(r), (int) Math.round(g), (int) Math.round(b) };
+            return new int[]{(int) Math.round(r), (int) Math.round(g), (int) Math.round(b)};
         }
 
         l = Math.round(l * 255d);
-        return new int[] { (int) l, (int) l, (int) l };
+        return new int[]{(int) l, (int) l, (int) l};
     }
 
 }

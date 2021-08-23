@@ -1,5 +1,11 @@
 package com.advantech.bleeplib.image;
 
+/**
+ * A java bean for storing RGB color information.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ */
 public class RGBTriple {
     public final int[] channels;
 

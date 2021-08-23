@@ -2,6 +2,12 @@ package com.advantech.bleeplib.image;
 
 import android.graphics.Bitmap;
 
+/**
+ * An utility class for pre-process image using Floyd-SteinBerg Dithering method.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ */
 public class Dithering {
     public static final RGBTriple[] bw = { new RGBTriple(255, 255, 255), new RGBTriple(0, 0, 0) };
     public static final RGBTriple[] bwr = {new RGBTriple(255, 255, 255), new RGBTriple(0, 0, 0), new RGBTriple(255, 0, 0)};
@@ -13,9 +19,13 @@ public class Dithering {
             new RGBTriple(187, 187, 187), new RGBTriple(204, 204, 204), new RGBTriple(221, 221, 221), new RGBTriple(238, 238, 238),
             new RGBTriple(255, 255, 255)};
 
-    private Dithering() {
-    }
-
+    /**
+     * Pre-process image using Floyd-SteinBerg Dithering method.
+     *
+     * @param image
+     * @param palette
+     * @throws Exception
+     */
     public static void applyFloydSteinbergDithering(final Bitmap image, RGBTriple[] palette) throws Exception {
         for (int y = 0; y < image.getHeight(); y++) {
             for (int x = 0; x < image.getWidth(); x++) {
@@ -94,6 +104,13 @@ public class Dithering {
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
+    /**
+     * Find the nearest color using RGBTriple palette.
+     *
+     * @param argb      the source color in argb format
+     * @param palette   the palette you want to find the nearest color to the source color
+     * @return
+     */
     public static RGBTriple findNearestColor(final int argb, RGBTriple[] palette) {
         final int a = (argb >> 24) & 0xff;
         final int r = (argb >> 16) & 0xff;

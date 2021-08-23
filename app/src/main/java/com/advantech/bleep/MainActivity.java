@@ -12,74 +12,91 @@ import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.advantech.bleeplib.bean.PanelType;
+import com.advantech.bleeplib.bean.TaskType;
 import com.advantech.bleeplib.utils.BLEScanListener;
+import com.advantech.bleeplib.utils.BLETaskHandler;
+import com.advantech.bleeplib.utils.BLETaskHandlerCallback;
 import com.advantech.bleeplib.utils.BLEUtil;
+import com.advantech.bleeplib.utils.Common;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.Timer;
-import java.util.TimerTask;
 
-import static com.advantech.bleeplib.common.Common.byteArrayToHexStr;
+import static com.advantech.bleeplib.utils.Common.byteArrayToHexStr;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-    public static final int REQUEST_PERMISSIONS = 0;
-    public static final int REQUEST_ENABLE_BT = 1;
+    private static final int REQUEST_PERMISSIONS = 0;
+    private static final int REQUEST_ENABLE_BT = 1;
+    private BLEUtil bleUtil = BLEUtil.getInstance();
     private Context context;
     private Button btnScan;
     private Button btnStop;
+    private Button btnPush1;
+    private Button btnPush2;
+    private Button btnPush3;
     private RecyclerView recyclerView;
     private DeviceAdapter deviceAdapter;
-    private ArrayList<Device> deviceList = new ArrayList<>(); // 將搜尋到的 devices 存起來  很重要！不可複寫該物件實體！
-    private BLEUtil bleUtil = BLEUtil.getInstance();
+    private ArrayList<Device> deviceList = new ArrayList<>();
+    private Map<String, Device> selectDevices = new HashMap<>();
+    private boolean isScan = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        getSupportActionBar().setTitle("Main Activity");
 
         context = this;
 
-        // 向使用者要求權限
+        // Ask permissions for file locations
         askPermissions();
 
-        // 初始化，並檢查手機是否支援 Bluetooth
+        // BLE initial
         if (!bleUtil.initial(context)) {
-            Toast.makeText(getBaseContext(), "No Support Bluetooth!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getBaseContext(), "Not Support Bluetooth!", Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
 
-        // 先註冊 BLE 掃描後的回調事件
+        // BLE scanning callback listener
         bleUtil.addScanListener(bleScanListener);
 
-        // 抓取元素
+        // Get elements from UI
         btnScan = (Button) findViewById(R.id.btnScan);
         btnStop = (Button) findViewById(R.id.btnStop);
+        btnPush1 = (Button) findViewById(R.id.btnPush1);
+        btnPush2 = (Button) findViewById(R.id.btnPush2);
+        btnPush3 = (Button) findViewById(R.id.btnPush3);
 
+        // Button click action
         btnScan.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // BLE 開始掃描
+                // BLE scan
                 startScan();
             }
         });
@@ -87,12 +104,33 @@ public class MainActivity extends AppCompatActivity {
         btnStop.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // BLE 停止掃描
+                // BLE stop scan
                 stopScan();
             }
         });
 
-        // 設備列表
+        btnPush1.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startTasks("1");
+            }
+        });
+
+        btnPush2.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startTasks("2");
+            }
+        });
+
+        btnPush3.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startTasks("w");
+            }
+        });
+
+        // Device Lists
         recyclerView = (RecyclerView) findViewById(R.id.rvDevices);
         recyclerView.setLayoutManager(new StaggeredGridLayoutManager(1, StaggeredGridLayoutManager.VERTICAL));
         deviceAdapter = new DeviceAdapter(context, deviceList);
@@ -102,10 +140,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 如果使用者已經將 bluetooth 關閉，會詢問是否打開？
+        // If user close BLE, please ask them to enable BLE
         if (!bleUtil.isValid()) {
             Intent intent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            startActivityForResult(intent, REQUEST_ENABLE_BT); //再利用 startActivityForResult 啟動該 Intent
+            startActivityForResult(intent, REQUEST_ENABLE_BT);
         }
 
         btnScan.setEnabled(true);
@@ -115,7 +153,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        // BLE 停止掃描
+        // BLE stop scan to save power
         stopScan();
     }
 
@@ -129,15 +167,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startScan() {
-        bleUtil.startScan(60); // 永遠掃描
+        bleUtil.startScan(60); // (Unit: Seconds)
         btnScan.setEnabled(false);
         btnStop.setEnabled(true);
+        btnPush1.setEnabled(false);
+        btnPush2.setEnabled(false);
+        btnPush3.setEnabled(false);
+        isScan = true;
     }
 
     private void stopScan() {
         bleUtil.stopScan();
         btnScan.setEnabled(true);
         btnStop.setEnabled(false);
+        btnPush1.setEnabled(true);
+        btnPush2.setEnabled(true);
+        btnPush3.setEnabled(true);
+        isScan = false;
+        refreshDeviceAdapterUI(); // trigger UI changed
     }
 
     private BLEScanListener bleScanListener = new BLEScanListener() {
@@ -148,24 +195,24 @@ public class MainActivity extends AppCompatActivity {
             if (device.getName() == null || device.getName().indexOf("Advantech_") == -1) return;
 
             // Parse Manufacturer Data
-            byte[] data = bleUtil.parseManufacturerData(scanRecord);
+            byte[] data = Common.parseManufacturerData(scanRecord);
             if (data == null) return;
             String hexStr = byteArrayToHexStr(data);
 
             String macAddress = device.getAddress();
             String name = device.getName();
-            Log.e(TAG, String.format("mac: %s; name: %s; rssi: %d manufacturer data: %s", macAddress, name, rssi, hexStr));
+            Log.i(TAG, String.format("mac: %s; name: %s; rssi: %d manufacturer data: %s", macAddress, name, rssi, hexStr));
 
             Device d = new Device(macAddress);
             int index = deviceList.indexOf(d);
-            if (index == -1) { // 新的設備
+            if (index == -1) { // New device
                 d.setDeviceName(device.getName());
                 d.setRssi(rssi);
                 d.setAlarm(data[0] == 0x01);
                 d.setProgress(0);
                 d.setMessage("");
                 deviceList.add(d);
-            } else { // 重複的設備
+            } else { // Old device
                 d = deviceList.get(index);
                 d.setRssi(rssi);
                 d.setAlarm(data[0] == 0x01);
@@ -177,22 +224,93 @@ public class MainActivity extends AppCompatActivity {
         // 掃描狀態改變
         @Override
         public void onScanStatusChanged(boolean isScanning) {
-            Log.e(TAG, String.format("isScanning: %s", isScanning));
+            Log.i(TAG, String.format("isScan: %s", isScanning));
             if (!isScanning) {
                 btnScan.setEnabled(true);
                 btnStop.setEnabled(false);
+                btnPush1.setEnabled(true);
+                btnPush2.setEnabled(true);
+                btnPush3.setEnabled(true);
             }
         }
     };
 
+    // Run on UI thread to refresh deviceAdapter UI
     private void refreshDeviceAdapterUI() {
-        // 更新 deviceAdapter UI 上的內容
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 deviceAdapter.notifyDataSetChanged();
             }
         });
+    }
+
+    private String getFilename(String panel, String index) {
+        return "epd" + panel.split("-")[1] + "_" + index;
+    }
+
+    private void startTasks(String index) {
+        int count = 0;
+        for (String mac : selectDevices.keySet()) {
+            Device d = selectDevices.get(mac);
+            // 1. New a BLETaskHandler and Register BLE Task Callback
+            BLETaskHandler bleTaskHandler = new BLETaskHandler(mac, new BLETaskHandlerCallback() {
+                @Override
+                public void onSuccess(String message) {
+                    d.setMessage(message);
+                    refreshDeviceAdapterUI();
+                }
+
+                @Override
+                public void onProgress(int progress) {
+                    d.setMessage(progress + "%");
+                    refreshDeviceAdapterUI();
+                }
+
+                @Override
+                public void onReady(String message) {
+                    d.setMessage(message);
+                    refreshDeviceAdapterUI();
+                }
+
+                @Override
+                public void onError(String message) {
+                    d.setMessage(message);
+                    refreshDeviceAdapterUI();
+                }
+
+                @Override
+                public void onFirmwareRead(String firmware) {
+
+                }
+
+                @Override
+                public void onLEDRead(byte[] read) {
+
+                }
+            });
+
+            String deviceName = d.getDeviceName();
+            PanelType panelType = Common.getPanelTypeByName(deviceName);
+            // get bitmap from drawable
+            String panel = panelType.getValue();
+            String file = getFilename(panel, index);
+            int drawable = getResources().getIdentifier(file, "drawable", getPackageName());
+            Bitmap bitmap = BitmapFactory.decodeResource(context.getResources(), drawable);
+            // Resize bitmap to fit each size of panel-type
+            Bitmap resizeBitmap = Common.resizeBitmap(bitmap, panelType.getWidth(), panelType.getHeight());
+            // Rotate bitmap
+            Bitmap finalBitmap = Common.rotateImage(resizeBitmap, 180);
+            // 2. Start a Task to Push Image
+            boolean result = bleTaskHandler.startTask(TaskType.PUSH_IMAGE, panelType, finalBitmap, 1, 1, true);
+            if (result) {
+                count++;
+            } else {
+                Toast.makeText(context, "Connection Existed!!! ( " + mac + " )", Toast.LENGTH_SHORT).show();
+            }
+        }
+
+        Toast.makeText(context, "Push Image Jobs: " + count, Toast.LENGTH_SHORT).show();
     }
 
     // RecyclerView
@@ -225,6 +343,38 @@ public class MainActivity extends AppCompatActivity {
                 holder.ivAlarm.setVisibility(View.VISIBLE);
             else
                 holder.ivAlarm.setVisibility(View.INVISIBLE);
+            if (isScan) {
+                holder.btnConnect.setEnabled(false);
+                holder.cbDevice.setEnabled(false);
+            } else {
+                holder.btnConnect.setEnabled(true);
+                holder.cbDevice.setEnabled(true);
+            }
+            holder.btnConnect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    // Shift from MainActivity to DeviceActivity
+                    Intent intent = new Intent(context, DeviceActivity.class);
+                    intent.putExtra("deviceName", device.getDeviceName());
+                    intent.putExtra("mac", device.getMac());
+                    startActivity(intent);
+                }
+            });
+            holder.cbDevice.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                    if (isChecked) {
+                        selectDevices.put(device.getMac(), device);
+                    } else {
+                        selectDevices.remove(device.getMac());
+                    }
+                }
+            });
+            if (selectDevices.containsKey(device.getMac())) {
+                holder.cbDevice.setChecked(true);
+            } else {
+                holder.cbDevice.setChecked(false);
+            }
         }
 
         @Override
@@ -235,6 +385,8 @@ public class MainActivity extends AppCompatActivity {
         class MyViewHolder extends RecyclerView.ViewHolder {
             TextView tvRssi, tvName, tvMac, tvMessage;
             ImageView ivAlarm;
+            CheckBox cbDevice;
+            Button btnConnect;
 
             public MyViewHolder(@NonNull View itemView) {
                 super(itemView);
@@ -243,6 +395,8 @@ public class MainActivity extends AppCompatActivity {
                 tvMac = (TextView) itemView.findViewById(R.id.tvMac);
                 tvMessage = (TextView) itemView.findViewById(R.id.tvMessage);
                 ivAlarm = (ImageView) itemView.findViewById(R.id.ivAlarm);
+                cbDevice = (CheckBox) itemView.findViewById(R.id.cbDevice);
+                btnConnect = (Button) itemView.findViewById(R.id.btnConnect);
             }
         }
     }

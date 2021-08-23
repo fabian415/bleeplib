@@ -1,5 +1,11 @@
 package com.advantech.bleeplib.bean;
 
+/**
+ * An enum for panel-types of Advantech EPD device.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ */
 public enum PanelType {
 
     EPD250(0, "EPD-250", 296, 128),
@@ -18,18 +24,38 @@ public enum PanelType {
         this.height = height;
     }
 
+    /**
+     * Get serial number.
+     *
+     * @return  serial number
+     */
     public int getId() {
         return id;
     }
 
+    /**
+     * Get the panel-type name.
+     *
+     * @return  the panel-type name
+     */
     public String getValue() {
         return value;
     }
 
+    /**
+     * Get the width of this panel-type.
+     *
+     * @return  the width of this panel-type
+     */
     public int getWidth() {
         return width;
     }
 
+    /**
+     * Get the height of this panel-type.
+     *
+     * @return the height of this panel-type
+     */
     public int getHeight() {
         return height;
     }

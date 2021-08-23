@@ -2,19 +2,32 @@ package com.advantech.bleeplib.utils;
 
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothProfile;
-import android.content.Context;
 import android.graphics.Bitmap;
 import android.util.Log;
 
+import com.advantech.bleeplib.bean.BLEImageWriteStatus;
 import com.advantech.bleeplib.bean.PanelType;
 import com.advantech.bleeplib.bean.TaskType;
 
 import java.io.UnsupportedEncodingException;
 
-
+/**
+ * BLETaskHandler is an ready-to-use handler class that can assist user to do batch tasks for
+ * transmit image or firmware upgrade for more than one Advantech EPD devices at the same time.
+ * This handler will execute the sequential tasks one after one. These tasks including connecting
+ * to the EPD device, sending image/upgrading firmware patch, reporting the task status and
+ * progress, and disconnecting the EPD device after the job was done. This handler also implements
+ * the function for at most 5 times retry if device is disconnected when sending the task.
+ * connection timeout is set to 20 seconds and task timeout is set to 60 seconds to address the
+ * problems about no response from EPD devices. We highly recommend to use this handler if you have
+ * more than one jobs need to done for bulk of devices.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ *
+ */
 public class BLETaskHandler {
     private static final String TAG = "BLETaskHandler";
-    private Context context;
     private BLEUtil bleUtil = BLEUtil.getInstance();
     private String deviceMac;
     private TaskType taskType;
@@ -31,29 +44,64 @@ public class BLETaskHandler {
     private String read_firmware;
     private byte[] read_led;
     private String firmwareVersion;
+    private boolean autoDisconnect = false;
 
-    public BLETaskHandler(Context context, String deviceMac, BLETaskHandlerCallback bleTaskHandlerCallback) {
-        this.context = context;
+    /**
+     * New a BLETaskHandler constructor.
+     *
+     * @param deviceMac                 device mac address
+     * @param bleTaskHandlerCallback    add a task handler callback which will returns the task
+     *                                  results.
+     */
+    public BLETaskHandler(String deviceMac, BLETaskHandlerCallback bleTaskHandlerCallback) {
         this.deviceMac = deviceMac;
         this.bleTaskHandlerCallback = bleTaskHandlerCallback;
     }
 
-    // FOTA 工作
-    public boolean startTask(TaskType taskType, byte[] packageData, String firmwareVersion) {
+    /**
+     * Start a task for firmware upgrade using this BLETaskHandler object.
+     *
+     * @param taskType          task type, must be {@code TaskType.FIRMWARE_UPGRADE}
+     * @param packageData       package data in the byte array format
+     * @param firmwareVersion   firmware version
+     * @param autoDisconnect    {@code true} disconnect the device after the task is done;
+     *                          {@code false} remain the connection after the task is done
+     * @return                  {@code true} send this command successfully;
+     *                          {@code false} an existing task is still running or device in the waiting queue
+     */
+    public boolean startTask(TaskType taskType, byte[] packageData, String firmwareVersion, boolean autoDisconnect) {
         if (isTaskExecuting) return false;
 
         this.taskType = taskType;
         this.packageData = packageData;
         this.firmwareVersion = firmwareVersion;
-        // 先註冊 BLE 連接後的回調事件
-        bleUtil.addConnectListener(deviceMac, bleConnectListener);
-        // 連接設備
-        bleUtil.connect(deviceMac);
-        return true;
+        this.autoDisconnect = autoDisconnect;
+
+        // 先判斷是否已經被連線？
+        if(bleUtil.isConnectedOrInWaitingQueue(deviceMac)) {
+            return false;
+        } else {
+            // 如果沒有，才註冊 BLE 連接後的回調事件
+            bleUtil.addConnectListener(deviceMac, bleConnectListener);
+            // 再去連接設備
+            return bleUtil.connect(deviceMac);
+        }
     }
 
-    // 推圖工作
-    public boolean startTask(TaskType taskType, PanelType panelType, Bitmap image, int page, int action) {
+    /**
+     * Start a task for pushing image using this BLETaskHandler object.
+     *
+     * @param taskType       task type, must be {@code TaskType.PUSH_IMAGE}
+     * @param panelType      EPD panel-type {@see PanelType}
+     * @param image          image in the bitmap format which is ready to transmit; please resize image size to fit each EPD panel-type {@see PanelType}
+     * @param page           which page {@code number} you want to transmit image on the EPD device; this number must be larger than 0
+     * @param action         refresh this image immediately {@code 1} or not {@code 0}
+     * @param autoDisconnect {@code true} disconnect the device after the task is done;
+     *                       {@code false} remain the connection after the task is done
+     * @return               {@code true} send this command successfully;
+     *                       {@code false} an existing task is still running or device in the waiting queue
+     */
+    public boolean startTask(TaskType taskType, PanelType panelType, Bitmap image, int page, int action, boolean autoDisconnect) {
         if (isTaskExecuting) return false;
 
         this.taskType = taskType;
@@ -61,26 +109,48 @@ public class BLETaskHandler {
         this.image = image;
         this.page = page;
         this.action = action;
-        // 先註冊 BLE 連接後的回調事件
-        bleUtil.addConnectListener(deviceMac, bleConnectListener);
-        // 連接設備
-        bleUtil.connect(deviceMac);
-        return true;
+        this.autoDisconnect = autoDisconnect;
+
+        // 先判斷是否已經被連線？
+        if(bleUtil.isConnectedOrInWaitingQueue(deviceMac)) {
+            return false;
+        } else {
+            // 如果沒有，才註冊 BLE 連接後的回調事件
+            bleUtil.addConnectListener(deviceMac, bleConnectListener);
+            // 再去連接設備
+            return bleUtil.connect(deviceMac);
+        }
     }
 
-    // 檢查狀態工作
-    public boolean startTask(TaskType taskType) {
+    /**
+     * Start a task for check status using this BLETaskHandler object.
+     *
+     * @param taskType       task type, must be {@code TaskType.CHECK_STATUS}
+     * @param autoDisconnect {@code true} disconnect the device after the task is done;
+     *                       {@code false} remain the connection after the task is done
+     * @return               {@code true} send this command successfully;
+     *                       {@code false} an existing task is still running or device in the waiting queue
+     */
+    public boolean startTask(TaskType taskType, boolean autoDisconnect) {
         if (isTaskExecuting) return false;
 
         this.taskType = taskType;
-        this.packageData = packageData;
-        // 先註冊 BLE 連接後的回調事件
-        bleUtil.addConnectListener(deviceMac, bleConnectListener);
-        // 連接設備
-        bleUtil.connect(deviceMac);
-        return true;
+        this.autoDisconnect = autoDisconnect;
+
+        // 先判斷是否已經被連線？
+        if(bleUtil.isConnectedOrInWaitingQueue(deviceMac)) {
+            return false;
+        } else {
+            // 如果沒有，才註冊 BLE 連接後的回調事件
+            bleUtil.addConnectListener(deviceMac, bleConnectListener);
+            // 再去連接設備
+            return bleUtil.connect(deviceMac);
+        }
     }
 
+    /**
+     * Terminate the task and disconnect the device.
+     */
     public void disconnect() {
         // 解除工作狀態
         isTaskExecuting = false;
@@ -147,7 +217,7 @@ public class BLETaskHandler {
         }
 
         @Override
-        public void onServicesDiscovered(int status, BluetoothGatt gatt) {
+        public void onServicesDiscovered(int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 if (bleTaskHandlerCallback != null)
                     bleTaskHandlerCallback.onReady("Service Discovered!");
@@ -197,12 +267,20 @@ public class BLETaskHandler {
                     // 解除工作狀態
                     isTaskExecuting = false;
                     if (bleTaskHandlerCallback != null) bleTaskHandlerCallback.onSuccess(message);
+                    // Device disconnect
+                    if(autoDisconnect) {
+                        disconnect();
+                    }
                     break;
                 case TIMEOUT:
                 case ERROR:
                     // 解除工作狀態
                     isTaskExecuting = false;
                     if (bleTaskHandlerCallback != null) bleTaskHandlerCallback.onError(message);
+                    // Device disconnect
+                    if(autoDisconnect) {
+                        disconnect();
+                    }
                     break;
             }
         }
@@ -222,6 +300,10 @@ public class BLETaskHandler {
             // 解除工作狀態
             isTaskExecuting = false;
             if (bleTaskHandlerCallback != null) bleTaskHandlerCallback.onError(message);
+            // Device disconnect
+            if(autoDisconnect) {
+                disconnect();
+            }
         }
     };
 
