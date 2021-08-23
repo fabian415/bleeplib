@@ -4,6 +4,14 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal">
 
+    <CheckBox
+        android:id="@+id/cbDevice"
+        android:layout_width="30dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:enabled="false"
+        android:textColor="#4c4c4c" />
+
     <TextView
         android:id="@+id/tvRssi"
         android:layout_width="wrap_content"
@@ -39,15 +47,25 @@
             android:id="@+id/tvMessage"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:textColor="@color/teal_700"
             android:text=""
             android:textSize="10sp" />
     </LinearLayout>
 
     <ImageView
         android:id="@+id/ivAlarm"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_marginHorizontal="20dp"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginHorizontal="8dp"
+        android:layout_marginVertical="8dp"
         android:visibility="invisible"
         android:src="@drawable/ic_android_black_24dp" />
+
+    <Button
+        android:id="@+id/btnConnect"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:enabled="false"
+        android:textSize="10dp"
+        android:text="Connect" />
 </LinearLayout>

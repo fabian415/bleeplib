@@ -15,11 +15,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.advantech.bleeplib.bean.BLEImageWriteStatus;
 import com.advantech.bleeplib.bean.PanelType;
 import com.advantech.bleeplib.bean.TaskType;
 import com.advantech.bleeplib.image.ImageGenerator;
-import com.neovisionaries.bluetooth.ble.advertising.ADPayloadParser;
-import com.neovisionaries.bluetooth.ble.advertising.ADStructure;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -34,8 +33,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import static android.content.Context.BLUETOOTH_SERVICE;
-import static com.advantech.bleeplib.common.Common.byteArrayToHexStr;
+import static com.advantech.bleeplib.utils.Common.byteArrayToHexStr;
 
+/**
+ * BLEUtil is a singleton class for basic bluetooth communication with Advantech EPD devices. This
+ * class provides customized functions for scanning nearby devices, making a connection with a
+ * device, opening LED lights, firmware upgrading, and pushing image on the EPD device screen.
+ * Handshake protocol between Advantech EPD devices and the Android mobile has been well-defined
+ * based on Android Bluetooth Low Energy (BLE) APIs. In this class, we only allow four device
+ * connections at a time and other devices will be in the waiting queue temporarily. After a device
+ * is disconnected, we will pull a device from the waiting queue to continue to make the connection.
+ * Note: Because each Android device has the maximum connection limitations for concurrent
+ * device connections, please remember to disconnect EPD devices if no necessary to use them.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ * 
+ */
 public class BLEUtil {
     private static String TAG = "BLEUtil";
     private static BLEUtil instance = null;
@@ -44,8 +58,8 @@ public class BLEUtil {
     private List<BLEScanListener> bleScanListeners = new ArrayList<>();
     private Map<String, BLEDeviceBean> connectionQueue = new ConcurrentHashMap<>();
     private Map<String, BLEConnectListener> bleConnectListeners = new ConcurrentHashMap<>(); // mac, listener
-    private ConcurrentLinkedQueue<String> waitingQueue = new ConcurrentLinkedQueue<>(); // 最多六條同時連線，其餘放入 waitingList
-    public static final int MAX_CONNECTION_NUMBER = 4; // LG X9009 最多到四條連線同時
+    private ConcurrentLinkedQueue<String> waitingQueue = new ConcurrentLinkedQueue<>(); // 最多四條同時連線，其餘放入 waitingList
+    private static final int MAX_CONNECTION_NUMBER = 4; // LG X9009 最多到四條連線同時
     private boolean isScanning = false;
     private Handler mHandler; // 該 Handler 用來搜尋Devices scanTime 秒後，自動停止搜尋
 
@@ -59,11 +73,16 @@ public class BLEUtil {
 
     private final static String IMAGE_DESCRIPTOR_UUID = "00002902-0000-1000-8000-00805f9b34fb".toUpperCase();
     private Context context;
-    public static final int IMAGE_HEADER_LEN = 32;
+    private static final int IMAGE_HEADER_LEN = 32;
 
     private BLEUtil() {
     }
 
+    /**
+     * Obtain the BLEUtil singleton instance.
+     *
+     * @return BLEUtil
+     */
     public static BLEUtil getInstance() {
         if (instance == null) {
             synchronized (BLEUtil.class) {
@@ -75,6 +94,15 @@ public class BLEUtil {
         return instance;
     }
 
+    /**
+     * Initialization for Android bluetooth resources and utilities in Activity.
+     * This step must be implemented in the beginning of your program.
+     *
+     * @param context   the context of Android activity
+     * @return          {@code true} if Android device has bluetooth service and initialize
+     *                  successfully;
+     *                  {@code false} otherwise
+     */
     public boolean initial(Context context) {
         this.context = context;
         bluetoothManager = (BluetoothManager) context.getSystemService(BLUETOOTH_SERVICE);
@@ -83,12 +111,18 @@ public class BLEUtil {
         return bluetoothAdapter != null;
     }
 
-    public boolean isValid() {
-        return bluetoothAdapter != null && bluetoothAdapter.isEnabled();
-    }
-
-    public void startScan(int scanTime) {
-        if (isScanning) return;
+    /**
+     * Start a scan searching for nearby devices through BLE.
+     * Please remember to register scan listener before start a scan.
+     * @see BLEUtil#addScanListener(BLEScanListener)
+     *
+     * @param scanTime   {@code -1} start a scan without stop;
+     *                   {@code number} start a scan for a limited time (unit: seconds)
+     * @return           {@code true} if start a scan successfully;
+     *                   {@code false} already started
+     */
+    public boolean startScan(int scanTime) {
+        if (isScanning) return false;
         if (scanTime > -1) { // 如果 scanTime > -1，則設定倒數
             // 啟動一個 Handler，並使用 postDelayed 在 scanTime 秒後自動執行此 Runnable()
             mHandler.postDelayed(myRunnable, scanTime * 1000);
@@ -97,21 +131,26 @@ public class BLEUtil {
         bluetoothAdapter.startLeScan(leScanCallback);
         isScanning = true;
         Log.d(TAG, "Start Scan");
-        // notify each listener
+        // notify clients
         for (BLEScanListener bleScanListener : bleScanListeners) {
-            bleScanListener.onScanStatusChanged(false);
+            bleScanListener.onScanStatusChanged(isScanning);
         }
+        return true;
     }
 
+    /**
+     * Stop a scan.
+     *
+     */
     public void stopScan() {
         // 停止搜尋
         bluetoothAdapter.stopLeScan(leScanCallback);
         isScanning = false;
         Log.d(TAG, "Stop Scan");
         mHandler.removeCallbacks(myRunnable);
-        // notify each listener
+        // notify clients
         for (BLEScanListener bleScanListener : bleScanListeners) {
-            bleScanListener.onScanStatusChanged(false);
+            bleScanListener.onScanStatusChanged(isScanning);
         }
     }
 
@@ -122,50 +161,47 @@ public class BLEUtil {
         }
     };
 
-
-    // 建立一個 BLAdapter 的 Callback，當使用 startLeScan 或 stopLeScan 時，每搜尋到一次設備都會跳到此 callback
     private BluetoothAdapter.LeScanCallback leScanCallback = new BluetoothAdapter.LeScanCallback() {
         @Override
         public void onLeScan(final BluetoothDevice device, final int rssi, byte[] scanRecord) {
-            // notify each listener
+            // notify clients
             for (BLEScanListener bleScanListener : bleScanListeners) {
                 bleScanListener.onLeScan(device, rssi, scanRecord);
             }
         }
     };
 
-    // scan record parser
-    public byte[] parseManufacturerData(byte[] scanRecord) {
-        byte[] result = null;
-        List<ADStructure> structures = ADPayloadParser.getInstance().parse(scanRecord);
-        for (ADStructure structure : structures) {
-            byte type = Integer.valueOf(structure.getType()).byteValue();
-            byte[] data = structure.getData();
-            if (type == (byte) 0xFF) { // Manufacturer Specific Data
-                result = data;
-                break;
-            }
-        }
-        return result;
-    }
-
-    public synchronized void connect(String address) {
+    /**
+     * Make a connection with a device using the mac address.
+     * Please remember to register connection listener before make a connection.
+     * @see BLEUtil#addConnectListener(String, BLEConnectListener)
+     *
+     * @param address   device mac address
+     * @return          {@code true} if connect a device successfully (Note: it's possible to stay
+     *                  in the waiting queue temporarily if reach the four maximum connections
+     *                  limit);
+     *                  {@code false} if connection exists or already in the waiting queue, we will
+     *                  return false
+     */
+    public synchronized boolean connect(String address) {
+        boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(address);
-        if (bean == null) {
-            // 超過最大上限，則先存入 waitingQueue 中
+        // if this mac is not in connection and not in the waiting queue
+        if (bean == null && !waitingQueue.contains(address)) {
+            // over the max limit, offer to the waiting queue first
             if (connectionQueue.size() >= MAX_CONNECTION_NUMBER) {
-                waitingQueue.offer(address); // 放入
-                return;
+                waitingQueue.offer(address);
+                return true;
             }
 
-            // 根據地址獲取設備
+            // get BluetoothDevice object via mac
             BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
-            // 獲取鏈接 這個時候需要實現 BluetoothGattCallback
+            // make a connection, and also register a BluetoothGattCallback listener
             BluetoothGatt bluetoothGatt = device.connectGatt(context, false, bluetoothGattCallback);
             BLEDeviceBean bleDeviceBean = new BLEDeviceBean(address, bluetoothGatt, new BLEDeviceBeanTimeoutCallback() {
                 @Override
                 public void onTaskTimeout(int progress) {
-                    // notify user
+                    // notify clients
                     for (String mac : bleConnectListeners.keySet()) {
                         if (mac.equals(address)) {
                             BLEConnectListener listener = bleConnectListeners.get(address);
@@ -177,7 +213,7 @@ public class BLEUtil {
 
                 @Override
                 public void onConnectionTimeout() {
-                    // notify user
+                    // notify clients
                     for (String mac : bleConnectListeners.keySet()) {
                         if (mac.equals(address)) {
                             BLEConnectListener listener = bleConnectListeners.get(address);
@@ -187,38 +223,45 @@ public class BLEUtil {
                     }
                 }
             });
-            // 開啟連線 timer
-            boolean result = bleDeviceBean.startConnTimeoutChecker();
+            // start a connection timeout timer
+            result = bleDeviceBean.startConnTimeoutChecker();
             connectionQueue.put(address, bleDeviceBean);
-            Log.e(TAG, "====== Connection Number (add " +address+ "): " + connectionQueue.size());
+            Log.d(TAG, "Connection Number (add " + address + "): " + connectionQueue.size());
+            return result;
         } else {
-            Log.e(TAG, "====== Connection Existed!!! ( " +address+ " )");
+            Log.d(TAG, "Connection existed or already in Waiting Queue !!! ( " + address + " )");
+            result = false;
+            return result;
         }
     }
 
-    // When multiple devices are disconnected, they need to be removed one by one.
-    // This is different from when a single device is disconnected.
+
+    /**
+     * Disconnect a device using the mac address.
+     *
+     * @param address   device mac address
+     */
     public synchronized void disconnect(String address) {
         BLEDeviceBean bean = connectionQueue.get(address);
         if (bean != null) {
             BluetoothGatt bluetoothGatt = bean.getBluetoothGatt();
             if (bluetoothGatt != null) {
+                // disconnect a device
                 bluetoothGatt.disconnect();
-//                bluetoothGatt.close();
 
                 new Thread(new Runnable() {
                     public void run() {
                         try {
+                            // 1 seconds later, remove the device from the connection queue
                             Thread.sleep(1000);
                             connectionQueue.remove(address);
-                            bleConnectListeners.remove(address);
-                            Log.e(TAG, "====== Connection Number (remove " +address+ "): " + connectionQueue.size());
-                            // 詢問 waitingQueue 上是否有等待清單？
+                            Log.d(TAG, "Connection Number (remove " + address + "): " + connectionQueue.size());
+                            // ask the waiting queue if have other devices?
                             if (waitingQueue.size() > 0) {
-                                String nextMac = waitingQueue.poll(); // 取出
-                                // 解決問題 Can't create handler inside thread Thread[Thread-80,5,main] that has not called Looper.prepare()
+                                String nextMac = waitingQueue.poll();
+                                // Fix a bug: Can't create handler inside thread Thread[Thread-80,5,main] that has not called Looper.prepare()
                                 Looper.prepare(); // *
-                                connect(nextMac); // 這裡面有 handler
+                                connect(nextMac); // here has a handler
                                 Looper.loop(); // * 這種情形下，Runnable 物件是運行在子執行緒的，可以進行長時間的聯網操作，但不能更新 UI
                             }
                         } catch (InterruptedException e) {
@@ -227,29 +270,36 @@ public class BLEUtil {
                     }
                 }).start();
             }
-            // 停掉 Timeout Timer
+            // remove connection timeout timer and task timeout timer
             bean.removeTaskTimeoutChecker();
             bean.removeConnTimeoutChecker();
         }
     }
 
+    /**
+     * Reconnect a device using the mac address. This function will force to disconnect the device
+     * if the connection has been existed.
+     *
+     * @param address   device mac address
+     */
     public synchronized void reconnect(String address) {
         BLEDeviceBean bean = connectionQueue.get(address);
-        if (bean != null) {
+        if (bean != null) { // if the connection existed
             BluetoothGatt bluetoothGatt = bean.getBluetoothGatt();
             if (bluetoothGatt != null) {
+                // disconnect a device
                 bluetoothGatt.disconnect();
-//                bluetoothGatt.close();
 
                 new Thread(new Runnable() {
                     public void run() {
                         try {
+                            // 1 seconds later, remove the device from the connection queue
                             Thread.sleep(1000);
                             connectionQueue.remove(address);
-                            Log.e(TAG, "====== Connection Number: " + connectionQueue.size());
-                            // 解決問題 Can't create handler inside thread Thread[Thread-80,5,main] that has not called Looper.prepare()
+                            Log.d(TAG, "Connection Number: " + connectionQueue.size());
+                            // Fix a bug: Can't create handler inside thread Thread[Thread-80,5,main] that has not called Looper.prepare()
                             Looper.prepare(); // *
-                            connect(address); // 這裡面有 handler
+                            connect(address); // here has a handler
                             Looper.loop(); // * 這種情形下，Runnable 物件是運行在子執行緒的，可以進行長時間的聯網操作，但不能更新 UI
                         } catch (InterruptedException e) {
                             e.printStackTrace();
@@ -257,44 +307,62 @@ public class BLEUtil {
                     }
                 }).start();
             }
-            // 停掉 Timeout Timer
+            // remove connection timeout timer and task timeout timer
             bean.removeTaskTimeoutChecker();
             bean.removeConnTimeoutChecker();
+        } else {  // if already disconnected
+            connect(address); // here has a handler
         }
     }
 
+    /**
+     * Check if the device is connected or in the waiting queue.
+     *
+     * @param address   device mac address
+     * @return          {@code true} the device is either connected or in the waiting queue;
+     *                  {@code false} otherwise
+     */
+    public synchronized boolean isConnectedOrInWaitingQueue(String address) {
+        BLEDeviceBean bean = connectionQueue.get(address);
+        return bean != null || waitingQueue.contains(address);
+    }
 
     BluetoothGattCallback bluetoothGattCallback = new BluetoothGattCallback() {
+
         /**
-         * 返回鏈接狀態
-         * @param gatt
-         * @param status 鏈接或者斷開連接是否成功 {@link BluetoothGatt#GATT_SUCCESS}
-         * @param newState 返回一個新的狀態{@link BluetoothProfile#STATE_DISCONNECTED} or
+         * Return connection status.
+         *
+         * @param gatt      BluetoothGatt object
+         * @param status    if connection success, then return {@link BluetoothGatt#GATT_SUCCESS}
+         * @param newState  return a new status {@link BluetoothProfile#STATE_DISCONNECTED} or
          *                                  {@link BluetoothProfile#STATE_CONNECTED}
          */
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             super.onConnectionStateChange(gatt, status, newState);
             String mac = gatt.getDevice().getAddress();
-            BLEDeviceBean bean = connectionQueue.get(mac);
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.e(TAG, mac + " Connected");
-                // 連接成功！主動發現遠程設備提供的服務，以及它們包含的特征特性和描述符等
+                Log.d(TAG, mac + " Connected");
+                // Step 1. discover services
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.e(TAG, mac + " Disconnected");
-                // 斷線時，主動停掉 Timeout Timer
-                bean.removeTaskTimeoutChecker();
-                bean.removeConnTimeoutChecker();
-
-                // 確定收到 disconnect 後才關閉 gatt 資源，Issue 183108: https://code.google.com/p/android/issues/detail?id=183108
+                Log.d(TAG, mac + " Disconnected");
+                // close the BluetoothGatt object after receiving disconnection event.
+                // fix a bug 183108: https://code.google.com/p/android/issues/detail?id=183108
                 try {
                     gatt.close();
                 } catch (Exception e) {
                     Log.e(TAG, "close ignoring: " + e);
                 }
+
+                // remove connection timeout timer and task timeout timer
+                BLEDeviceBean bean = connectionQueue.get(mac);
+                if (bean != null) {
+                    bean.removeTaskTimeoutChecker();
+                    bean.removeConnTimeoutChecker();
+                }
             }
-            // notify
+            // notify clients
             for (String address : bleConnectListeners.keySet()) {
                 if (address.equals(mac)) {
                     BLEConnectListener listener = bleConnectListeners.get(address);
@@ -305,27 +373,28 @@ public class BLEUtil {
         }
 
         /**
-         *  獲取到鏈接設備的GATT服務時的回調
-         * @param gatt
-         * @param status 成功返回{@link BluetoothGatt#GATT_SUCCESS}
+         * BluetoothGatt service discovery callback.
+         *
+         * @param gatt      BluetoothGatt object
+         * @param status    if success, then return {@link BluetoothGatt#GATT_SUCCESS}
          */
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             super.onServicesDiscovered(gatt, status);
             String mac = gatt.getDevice().getAddress();
             if (BluetoothGatt.GATT_SUCCESS == status) {
-                Log.e(TAG, mac + " Service Discovery...");
+                Log.d(TAG, mac + " Service Discovery...");
                 Map<String, BluetoothGattCharacteristic> characteristicMap = new HashMap<>();
                 List<BluetoothGattService> gattServices = gatt.getServices();
-                // 獲取服務
+                // for-loop all service
                 for (BluetoothGattService gattService : gattServices) {
-                    // 獲取每個服務中包含的特征
+                    // characteristics in each service
                     List<BluetoothGattCharacteristic> gattCharacteristics = gattService.getCharacteristics();
                     for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
                         String uuid = gattCharacteristic.getUuid().toString();
                         if (uuid == null) continue;
                         uuid = uuid.toUpperCase();
-                        // 將重要的 characteristic，先存入 HashMap
+                        // save key characteristics in the HashMap
                         switch (uuid) {
                             case FIRMWARE_CHAR_UUID:
                             case LED_CHAR_UUID:
@@ -338,29 +407,32 @@ public class BLEUtil {
                     }
                 }
                 BLEDeviceBean bean = connectionQueue.get(mac);
-                bean.setCharMap(characteristicMap);
+                if (bean != null) {
+                    bean.setCharMap(characteristicMap);
+                }
 
-                // 設定 MTU Level
+                // Step 2. set MTU Level to 251
                 boolean result = gatt.requestMtu(BLE_MTU);
             } else {
                 Log.e(TAG, mac + " Service Discovery Error");
             }
 
-            // notify
+            // notify clients
             for (String address : bleConnectListeners.keySet()) {
                 if (address.equals(mac)) {
                     BLEConnectListener listener = bleConnectListeners.get(address);
-                    listener.onServicesDiscovered(status, gatt);
+                    listener.onServicesDiscovered(status);
                     break;
                 }
             }
         }
 
         /**
-         * 讀特征的時候的回調
-         * @param gatt
-         * @param characteristic 從相關設備上面讀取到的特征值
-         * @param status
+         * Characteristic read callback.
+         *
+         * @param gatt            BluetoothGatt object
+         * @param characteristic  BluetoothGattCharacteristic object
+         * @param status          if success, then return {@link BluetoothGatt#GATT_SUCCESS}
          */
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
@@ -370,7 +442,7 @@ public class BLEUtil {
 
             if (LED_CHAR_UUID.equalsIgnoreCase(characteristic.getUuid().toString())) {
                 Log.d(TAG, mac + " LED Read: 0x" + byteArrayToHexStr(read));
-                // notify
+                // notify clients
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -378,15 +450,17 @@ public class BLEUtil {
                         break;
                     }
                 }
-                // 停止連線 timer
+                // Step 6. Handshake done!
                 BLEDeviceBean bean = connectionQueue.get(mac);
+                if (bean == null) return;
+                // remove connection timeout timer
                 bean.removeConnTimeoutChecker();
             } else if (FIRMWARE_CHAR_UUID.equalsIgnoreCase(characteristic.getUuid().toString())) {
                 try {
                     Log.d(TAG, mac + " Firmware Read: " + new String(read, "UTF-8"));
                 } catch (Exception e) {
                 }
-                // notify
+                // notify clients
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -394,15 +468,16 @@ public class BLEUtil {
                         break;
                     }
                 }
+                // Step 5. Read LED status
                 readLEDStatus(gatt);
             }
         }
 
         /**
-         * 指定特征寫入操作的回調結果
-         * @param gatt
-         * @param characteristic
-         * @param status
+         * Characteristic write callback.
+         * @param gatt              BluetoothGatt object
+         * @param characteristic    BluetoothGattCharacteristic object
+         * @param status            if success, then return {@link BluetoothGatt#GATT_SUCCESS}
          */
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
@@ -411,13 +486,10 @@ public class BLEUtil {
             byte[] read = characteristic.getValue();
             String data = byteArrayToHexStr(read);
             BLEDeviceBean bean = connectionQueue.get(mac);
-
-//            if (status == BluetoothGatt.GATT_SUCCESS) {
-//                Log.e(TAG, gatt.getDevice().getAddress() + " 寫入成功: " + data);
-//            }
+            if (bean == null) return;
 
             if (LED_CHAR_UUID.equalsIgnoreCase(characteristic.getUuid().toString())) {
-                // notify
+                // notify clients
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -431,16 +503,17 @@ public class BLEUtil {
                 bean.addRunning_block_number(1);
                 int running_block_number = bean.getRunning_block_number();
                 if (running_block_number < bean.getImageGenerator().total_block_number) {
-                    // continue running blocks --- Fabian
+                    // continue running blocks --- B1
                     writeBlock(bean, running_block_number);
                 }
             }
         }
 
         /**
-         * 設備發出通知時會調用到該接口
-         * @param gatt
-         * @param characteristic
+         * Device send notify will trigger this callback.
+         *
+         * @param gatt              BluetoothGatt object
+         * @param characteristic    BluetoothGattCharacteristic object
          */
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
@@ -449,14 +522,14 @@ public class BLEUtil {
             String uuid = characteristic.getUuid().toString();
             byte[] notify_data = characteristic.getValue();
             BLEDeviceBean bean = connectionQueue.get(mac);
+            if (bean == null) return;
 
-//            Log.d(TAG, gatt.getDevice().getAddress() + " 特徵值改變：" + uuid + " 回應：" + byteArrayToHexStr(notify_data));
             if (IMAGE_ID_CHAR_UUID.equalsIgnoreCase(uuid)) {
-                // 停掉 Timeout Timer
+                // stop task timeout timer
                 bean.removeTaskTimeoutChecker();
                 Log.e(TAG, "Error! Send Image Identify Characteristic Error!");
 
-                // notify
+                // notify clients
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -481,25 +554,23 @@ public class BLEUtil {
                 }
 
                 if (block_number > 0) return;
-                // start running blocks --- Fabian
+                // start running blocks --- B1
                 bean.setRunning_block_number(0);
                 writeBlock(bean, 0);
 
             } else if (IMAGE_STATUS_CHAR_UUID.equalsIgnoreCase(uuid)) {
-                // 停掉 Timeout Timer
+                // stop task timeout timer
                 bean.removeTaskTimeoutChecker();
                 bean.setEnd_send_image_time(new Date().getTime());
                 long time = bean.getEnd_send_image_time() - bean.getStart_send_image_time();
                 Log.d(TAG, "Done! Send Image Done!");
-                Log.e(TAG, gatt.getDevice().getAddress() + " Time elapsed: " + time + " ms");
-                // notify
+                Log.d(TAG, gatt.getDevice().getAddress() + " Time elapsed: " + time + " ms");
                 String data = byteArrayToHexStr(notify_data);
                 boolean result = false;
                 String message = "";
                 switch (data) {
                     case "00": {
                         result = true;
-//                        message = "Success";
                         message = "Success! Take " + Math.round((double) time / (double) 1000 * 100.0) / 100.0 + " s";
                         break;
                     }
@@ -529,7 +600,7 @@ public class BLEUtil {
                         break;
                     }
                 }
-                // notify
+                // notify clients
                 int progress_percent = bean.getProgress_percent();
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
@@ -549,7 +620,7 @@ public class BLEUtil {
                     byte second = notify_data[1];
                     if (first == 0x01) {
                         if (second == 0x00) {
-                            // notify
+                            // notify clients
                             for (String address : bleConnectListeners.keySet()) {
                                 if (address.equals(mac)) {
                                     BLEConnectListener listener = bleConnectListeners.get(address);
@@ -558,7 +629,7 @@ public class BLEUtil {
                                 }
                             }
                         } else if (second == 0x01) {
-                            // notify
+                            // notify clients
                             for (String address : bleConnectListeners.keySet()) {
                                 if (address.equals(mac)) {
                                     BLEConnectListener listener = bleConnectListeners.get(address);
@@ -574,7 +645,7 @@ public class BLEUtil {
                         Log.d(TAG, "EPD Event Src: " + (src & 0xff) + " Result: " + (result & 0xff) + " Page Numb: " + (page & 0xff));
                         if (src == 0x02) { // refresh
                             if (result == 0x00) {
-                                // notify
+                                // notify clients
                                 for (String address : bleConnectListeners.keySet()) {
                                     if (address.equals(mac)) {
                                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -583,7 +654,7 @@ public class BLEUtil {
                                     }
                                 }
                             } else {
-                                // notify
+                                // notify clients
                                 for (String address : bleConnectListeners.keySet()) {
                                     if (address.equals(mac)) {
                                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -601,23 +672,24 @@ public class BLEUtil {
         }
 
         /**
-         * 指定描述符的讀操作的回調
-         * @param gatt
-         * @param descriptor
-         * @param status
+         * Descriptor read callback.
+         *
+         * @param gatt          BluetoothGatt object
+         * @param descriptor    BluetoothGattDescriptor object
+         * @param status        if success, then return {@link BluetoothGatt#GATT_SUCCESS}
          */
         @Override
         public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor,
                                      int status) {
             super.onDescriptorRead(gatt, descriptor, status);
-            Log.d(TAG, "讀取描述符: " + descriptor);
         }
 
         /**
-         * 指定描述符的寫操作
-         * @param gatt
-         * @param descriptor
-         * @param status
+         * Descriptor write callback.
+         *
+         * @param gatt          BluetoothGatt object
+         * @param descriptor    BluetoothGattDescriptor object
+         * @param status        if success, then return {@link BluetoothGatt#GATT_SUCCESS}
          */
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor,
@@ -626,16 +698,17 @@ public class BLEUtil {
             String mac = gatt.getDevice().getAddress();
 
             BLEDeviceBean bean = connectionQueue.get(mac);
+            if (bean == null) return;
+
             Map<String, BluetoothGattCharacteristic> characteristicMap = bean.getCharMap();
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                String uuid = descriptor.getUuid().toString();
                 if (IMAGE_DESCRIPTOR_UUID.equalsIgnoreCase(descriptor.getUuid().toString())) {
                     BluetoothGattCharacteristic gattCharacteristic = descriptor.getCharacteristic();
                     if (IMAGE_ID_CHAR_UUID.equalsIgnoreCase(gattCharacteristic.getUuid().toString())) {
-                        Log.e(TAG, mac + " Enable Image Identify notify success");
+                        Log.d(TAG, mac + " Enable Image Identify notify success");
                         bean.addDescCounter(1);
 
-                        // 2. Enable Image Block notify ......
+                        // Descriptor 2. Enable Image Block notify ......
                         if (characteristicMap != null) {
                             BluetoothGattCharacteristic gattCharacteristic1 = characteristicMap.get(IMAGE_BLOCK_CHAR_UUID);
                             enableNotification(gatt, gattCharacteristic1, UUID.fromString(IMAGE_DESCRIPTOR_UUID), true);
@@ -644,7 +717,7 @@ public class BLEUtil {
                         Log.d(TAG, mac + " Enable Image Block notify success");
                         bean.addDescCounter(1);
 
-                        // 3. Enable Image Status notify ......
+                        // Descriptor 3. Enable Image Status notify ......
                         if (characteristicMap != null) {
                             BluetoothGattCharacteristic gattCharacteristic1 = characteristicMap.get(IMAGE_STATUS_CHAR_UUID);
                             enableNotification(gatt, gattCharacteristic1, UUID.fromString(IMAGE_DESCRIPTOR_UUID), true);
@@ -653,7 +726,7 @@ public class BLEUtil {
                         Log.d(TAG, mac + " Enable Image Status notify success");
                         bean.addDescCounter(1);
 
-                        // 4. Enable Device event notify ......
+                        // Descriptor 4. Enable Device event notify ......
                         if (characteristicMap != null) {
                             BluetoothGattCharacteristic gattCharacteristic1 = characteristicMap.get(DEVICE_EVENT_CHAR_UUID);
                             enableNotification(gatt, gattCharacteristic1, UUID.fromString(IMAGE_DESCRIPTOR_UUID), true);
@@ -663,7 +736,7 @@ public class BLEUtil {
                         bean.addDescCounter(1);
 
                         if (bean.getDescCounter() == 4) {
-                            // Read Firmware
+                            // Step 4. Read Firmware
                             readFirmware(gatt);
                         }
                     }
@@ -672,34 +745,43 @@ public class BLEUtil {
         }
 
         /**
-         * 當一個寫入事物完成時的回調
+         * Reliable write completed callback.
+         *
          * @param gatt
          * @param status
          */
         @Override
         public void onReliableWriteCompleted(BluetoothGatt gatt, int status) {
             super.onReliableWriteCompleted(gatt, status);
-            Log.d(TAG, "寫入事物完成時的回調: ");
-
         }
 
+        /**
+         * Read remote rssi callback.
+         *
+         * @param gatt
+         * @param rssi
+         * @param status
+         */
         @Override
         public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
             super.onReadRemoteRssi(gatt, rssi, status);
         }
 
+        /**
+         * MTU changed callback.
+         *
+         * @param gatt
+         * @param mtu
+         * @param status
+         */
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
             super.onMtuChanged(gatt, mtu, status);
             String mac = gatt.getDevice().getAddress();
-            Log.e(TAG, mac + " MTU Changed " + mtu);
-            // 開始讀取狀態
+            Log.d(TAG, mac + " MTU Changed " + mtu);
+            // Step 3. start reading sequences
             readStatusSequence(gatt);
         }
-
-//        public void onConnectionUpdated(BluetoothGatt gatt, int interval, int latency, int timeout, int status) {
-//            Log.e(TAG, gatt.getDevice().getAddress() + " -- interval: " + interval + " latency: " + latency + " timeout: " + timeout + " status: " + status);
-//        }
     };
 
     private void writeBlock(BLEDeviceBean bean, int block_number) {
@@ -729,18 +811,19 @@ public class BLEUtil {
         }
     }
 
-    // 開始讀取狀態序列
     // enable Image descriptors -> read firmware version -> read LED status
-    public void readStatusSequence(BluetoothGatt gatt) {
+    private void readStatusSequence(BluetoothGatt gatt) {
         enableImageDescriptors(gatt);
     }
 
     // Enable image descriptors
-    public boolean enableImageDescriptors(BluetoothGatt gatt) {
+    private boolean enableImageDescriptors(BluetoothGatt gatt) {
         boolean result = false;
-        // 1. Enable Image Identify notify ......
+        // Descriptor 1. Enable Image Identify notify ......
         String mac = gatt.getDevice().getAddress();
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         Map<String, BluetoothGattCharacteristic> characteristicMap = bean.getCharMap();
         if (characteristicMap != null) {
             BluetoothGattCharacteristic gattCharacteristic = characteristicMap.get(IMAGE_ID_CHAR_UUID);
@@ -752,10 +835,37 @@ public class BLEUtil {
     }
 
     // Read Firmware Version
-    public boolean readFirmware(BluetoothGatt gatt) {
+    private boolean readFirmware(BluetoothGatt gatt) {
         boolean result = false;
         String mac = gatt.getDevice().getAddress();
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
+        Map<String, BluetoothGattCharacteristic> characteristicMap = bean.getCharMap();
+        if (characteristicMap != null) {
+            BluetoothGattCharacteristic gattCharacteristic = characteristicMap.get(FIRMWARE_CHAR_UUID);
+            if (gattCharacteristic != null) {
+                result = gatt.readCharacteristic(gattCharacteristic);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Read firmware version for a device.
+     * Firmware read result returns in the connection listener.
+     * @see BLEConnectListener#onFirmwareRead(int, byte[])
+     *
+     * @param mac       device mac address
+     * @return          {@code true} the command was send successfully;
+     *                  {@code false} device has not been connected or read characteristic failure
+     */
+    public boolean readFirmware(String mac) {
+        boolean result = false;
+        BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
+        BluetoothGatt gatt = bean.getBluetoothGatt();
         Map<String, BluetoothGattCharacteristic> characteristicMap = bean.getCharMap();
         if (characteristicMap != null) {
             BluetoothGattCharacteristic gattCharacteristic = characteristicMap.get(FIRMWARE_CHAR_UUID);
@@ -767,10 +877,12 @@ public class BLEUtil {
     }
 
     // Read LED Status
-    public boolean readLEDStatus(BluetoothGatt gatt) {
+    private boolean readLEDStatus(BluetoothGatt gatt) {
         boolean result = false;
         String mac = gatt.getDevice().getAddress();
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         Map<String, BluetoothGattCharacteristic> characteristicMap = bean.getCharMap();
         if (characteristicMap != null) {
             BluetoothGattCharacteristic gattCharacteristic = characteristicMap.get(LED_CHAR_UUID);
@@ -781,16 +893,66 @@ public class BLEUtil {
         return result;
     }
 
-    // Change Connection Priority
+    /**
+     * Read LED status for a device.
+     * LED read result returns in the connection listener.
+     * @see BLEConnectListener#onLEDRead(int, byte[])
+     *
+     * @param mac       device mac address
+     * @return          {@code true} the command was send successfully;
+     *                  {@code false} device has not been connected or read characteristic failure
+     */
+    public boolean readLEDStatus(String mac) {
+        boolean result = false;
+        BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
+        BluetoothGatt gatt = bean.getBluetoothGatt();
+        Map<String, BluetoothGattCharacteristic> characteristicMap = bean.getCharMap();
+        if (characteristicMap != null) {
+            BluetoothGattCharacteristic gattCharacteristic = characteristicMap.get(LED_CHAR_UUID);
+            if (gattCharacteristic != null) {
+                result = gatt.readCharacteristic(gattCharacteristic);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Change BLE connection priority for a device.
+     *
+     * @param mac           device mac address
+     * @param priority      Request a specific connection priority. Must be one of {@link
+     *                      BluetoothGatt#CONNECTION_PRIORITY_BALANCED}, {@link
+     *                      BluetoothGatt#CONNECTION_PRIORITY_HIGH} or {@link
+     *                      BluetoothGatt#CONNECTION_PRIORITY_LOW_POWER}.
+     *
+     * @return              {@code true} the command was send successfully;
+     *                      {@code false} otherwise
+     */
     public boolean changeConnectionPriority(String mac, int priority) {
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return false;
         return bean.getBluetoothGatt().requestConnectionPriority(priority);
     }
 
-    // Write LED Lights
+    /**
+     * Open or close LED Lights for a device.
+     * Write LED Lights result will return in the connection listener.
+     * @see BLEConnectListener#onLEDWrite(int, byte[])
+     *
+     * @param mac       device mac address
+     * @param led1      open {@code true} or close {@code false} the LED light 1
+     * @param led2      open {@code true} or close {@code false} the LED light 2
+     * @param led3      open {@code true} or close {@code false} the LED light 3
+     * @return          {@code true} the command was send successfully;
+     *                  {@code false} device has not been connected or write characteristic failure
+     */
     public boolean writeLED(String mac, boolean led1, boolean led2, boolean led3) {
         boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         Map<String, BluetoothGattCharacteristic> charMap = bean.getCharMap();
         BluetoothGattCharacteristic gattCharacteristic = charMap.get(LED_CHAR_UUID);
         if (gattCharacteristic != null) {
@@ -804,9 +966,21 @@ public class BLEUtil {
         return result;
     }
 
+    /**
+     * Open or close LED Light 1 for a device.
+     * Write LED Lights result will return in the connection listener.
+     * @see BLEConnectListener#onLEDWrite(int, byte[])
+     *
+     * @param mac       device mac address
+     * @param open      open {@code true} or close {@code false} the LED light 1
+     * @return          {@code true} the command was send successfully;
+     *                  {@code false} device has not been connected or write characteristic failure
+     */
     public boolean writeLED1(String mac, boolean open) {
         boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         Map<String, BluetoothGattCharacteristic> charMap = bean.getCharMap();
         BluetoothGattCharacteristic gattCharacteristic = charMap.get(LED_CHAR_UUID);
         if (gattCharacteristic != null) {
@@ -818,9 +992,21 @@ public class BLEUtil {
         return result;
     }
 
+    /**
+     * Open or close LED Light 2 for a device.
+     * Write LED Lights result will return in the connection listener.
+     * @see BLEConnectListener#onLEDWrite(int, byte[])
+     *
+     * @param mac       device mac address
+     * @param open      open {@code true} or close {@code false} the LED light 2
+     * @return          {@code true} the command was send successfully;
+     *                  {@code false} device has not been connected or write characteristic failure
+     */
     public boolean writeLED2(String mac, boolean open) {
         boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         Map<String, BluetoothGattCharacteristic> charMap = bean.getCharMap();
         BluetoothGattCharacteristic gattCharacteristic = charMap.get(LED_CHAR_UUID);
         if (gattCharacteristic != null) {
@@ -833,9 +1019,21 @@ public class BLEUtil {
         return result;
     }
 
+    /**
+     * Open or close LED Light 3 for a device.
+     * Write LED Lights result will return in the connection listener.
+     * @see BLEConnectListener#onLEDWrite(int, byte[])
+     *
+     * @param mac       device mac address
+     * @param open      open {@code true} or close {@code false} the LED light 3
+     * @return          {@code true} the command was send successfully;
+     *                  {@code false} device has not been connected or write characteristic failure
+     */
     public boolean writeLED3(String mac, boolean open) {
         boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         Map<String, BluetoothGattCharacteristic> charMap = bean.getCharMap();
         BluetoothGattCharacteristic gattCharacteristic = charMap.get(LED_CHAR_UUID);
         if (gattCharacteristic != null) {
@@ -847,9 +1045,22 @@ public class BLEUtil {
         return result;
     }
 
+    /**
+     * Push image to the EPD device.
+     *
+     * @param mac           device mac address
+     * @param panelType     EPD panel-type {@see PanelType}
+     * @param bitmap        image in the bitmap format which is ready to transmit; please resize image size to fit each EPD panel-type {@see PanelType}
+     * @param image_page    which page {@code number} you want to transmit image on the EPD device; this number must be larger than 0
+     * @param image_action  refresh this image immediately {@code 1} or not {@code 0}
+     * @return              {@code true} send this command successfully;
+     *                      {@code false} device is not connected or an existing task is still running
+     */
     public boolean pushImage(String mac, PanelType panelType, Bitmap bitmap, int image_page, int image_action) {
         boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         ImageGenerator imageGenerator = new ImageGenerator(TaskType.PUSH_IMAGE, panelType, bitmap, image_page, image_action);
         if (!bean.isImageWriting() && imageGenerator.isValid()) {
             bean.setDescCounter(0);
@@ -858,7 +1069,7 @@ public class BLEUtil {
 
             result = bean.startTaskTimeoutChecker();
             if (result) {
-                // notify
+                // notify clients
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -867,7 +1078,7 @@ public class BLEUtil {
                     }
                 }
 
-                // 開始推圖並計時
+                // start push image and count the timer
                 bean.setStart_send_image_time(new Date().getTime());
                 // 1. Send Image Identify Characteristic
                 result = imageGenerator.executeTask();
@@ -882,9 +1093,19 @@ public class BLEUtil {
         return result;
     }
 
+    /**
+     * Firmware upgrade to the EPD device.
+     *
+     * @param mac           device mac address
+     * @param packageData   package data in the byte array format
+     * @return              {@code true} send this command successfully;
+     *                      {@code false} device is not connected or an existing task is still running
+     */
     public boolean firmwareUpgrade(String mac, byte[] packageData) {
         boolean result = false;
         BLEDeviceBean bean = connectionQueue.get(mac);
+        if (bean == null) return result;
+
         ImageGenerator imageGenerator = new ImageGenerator(TaskType.FIRMWARE_UPGRADE, packageData);
         if (!bean.isImageWriting() && imageGenerator.isValid()) {
             bean.setDescCounter(0);
@@ -893,7 +1114,7 @@ public class BLEUtil {
 
             result = bean.startTaskTimeoutChecker();
             if (result) {
-                // notify
+                // notify clients
                 for (String address : bleConnectListeners.keySet()) {
                     if (address.equals(mac)) {
                         BLEConnectListener listener = bleConnectListeners.get(address);
@@ -917,7 +1138,7 @@ public class BLEUtil {
         return result;
     }
 
-    public boolean writeCharacteristic(BluetoothGatt gatt, BluetoothGattCharacteristic gattCharacteristic, byte[] data) {
+    private boolean writeCharacteristic(BluetoothGatt gatt, BluetoothGattCharacteristic gattCharacteristic, byte[] data) {
         boolean result = false;
         if (gattCharacteristic != null) {
             gattCharacteristic.setValue(data);
@@ -926,7 +1147,7 @@ public class BLEUtil {
         return result;
     }
 
-    public boolean enableNotification(BluetoothGatt gatt, BluetoothGattCharacteristic gattCharacteristic, UUID descripterUUID, boolean enable) {
+    private boolean enableNotification(BluetoothGatt gatt, BluetoothGattCharacteristic gattCharacteristic, UUID descripterUUID, boolean enable) {
         boolean result = false;
         if (gattCharacteristic != null) {
             // Enable Local Notification
@@ -943,36 +1164,59 @@ public class BLEUtil {
         return result;
     }
 
+    /**
+     * Check whether the Bluetooth utility is ready or not.
+     *
+     * @return      {@code true} the Bluetooth utility is ready to use;
+     *              {@code false} otherwise
+     */
+    public boolean isValid() {
+        return bluetoothAdapter != null && bluetoothAdapter.isEnabled();
+    }
 
-    // Getter and Setter
+    /**
+     * Check whether the Bluetooth utility is scanning or not.
+     *
+     * @return      {@code true} the Bluetooth utility is scanning;
+     *              {@code false} otherwise.
+     */
     public boolean isScanning() {
         return isScanning;
     }
 
-    public BluetoothManager getBluetoothManager() {
-        return bluetoothManager;
-    }
-
-    public BluetoothAdapter getBluetoothAdapter() {
-        return bluetoothAdapter;
-    }
-
+    /**
+     * Add a scan listener which will returns the scanning results.
+     *
+     * @param bleScanListener      BLE scanning listener
+     */
     public void addScanListener(BLEScanListener bleScanListener) {
         bleScanListeners.add(bleScanListener);
     }
 
+    /**
+     * Remove a scan listener and afterward you will no longer receive the scanning results.
+     *
+     * @param bleScanListener
+     */
     public void removeScanListener(BLEScanListener bleScanListener) {
         bleScanListeners.remove(bleScanListener);
     }
 
-    public List<BLEScanListener> getScanListeners() {
-        return bleScanListeners;
-    }
-
+    /**
+     * Add a connection listener which will returns the connection results.
+     *
+     * @param address               device mac address
+     * @param bleConnectListener    BLE connection listener
+     */
     public void addConnectListener(String address, BLEConnectListener bleConnectListener) {
         bleConnectListeners.put(address, bleConnectListener);
     }
 
+    /**
+     * Remove a connection listener according to the device mac address.
+     *
+     * @param address               device mac address
+     */
     public void removeConnectListener(String address) {
         bleConnectListeners.remove(address);
     }

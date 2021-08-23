@@ -9,6 +9,12 @@ import com.advantech.bleeplib.bean.TaskType;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
+/**
+ * An image generator for internal usage.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ */
 public class ImageGenerator {
 
     public static final int IMAGE_HEADER_LEN = 32;
@@ -40,6 +46,11 @@ public class ImageGenerator {
         this.image_action = image_action;
     }
 
+    /**
+     * Task type or image data is valid or not.
+     *
+     * @return
+     */
     public boolean isValid() {
         if (taskType == TaskType.PUSH_IMAGE) {
             if (panelType == null || bitmap == null) return false;
@@ -51,6 +62,11 @@ public class ImageGenerator {
         }
     }
 
+    /**
+     * Execute task.
+     *
+     * @return
+     */
     public boolean executeTask() {
         if (taskType == TaskType.PUSH_IMAGE) {
             switch (panelType) {
@@ -68,6 +84,11 @@ public class ImageGenerator {
         }
     }
 
+    /**
+     * Generate the OTA package.
+     *
+     * @return
+     */
     private boolean generatePackage() {
         byte[] newImageData = preProcessFOTAImage(imageData);
         newImageData = addPaddingData(newImageData);
@@ -76,6 +97,11 @@ public class ImageGenerator {
         return true;
     }
 
+    /**
+     * Generate the EPD-250 image.
+     *
+     * @return
+     */
     private boolean generateEPD250() {
         RGBTriple[] palette = Dithering.bw;
         int width = bitmap.getWidth();
@@ -107,6 +133,11 @@ public class ImageGenerator {
         return true;
     }
 
+    /**
+     * Generate the EPD-252 image.
+     *
+     * @return
+     */
     private boolean generateEPD252() {
         RGBTriple[] palette = Dithering.bwr;
         int width = bitmap.getWidth();
@@ -143,6 +174,11 @@ public class ImageGenerator {
         return true;
     }
 
+    /**
+     * Generate the EPD-353 image.
+     *
+     * @return
+     */
     private boolean generateEPD353() {
         RGBTriple[] palette = Dithering.sevenColor;
         int width = bitmap.getWidth();
@@ -204,6 +240,14 @@ public class ImageGenerator {
         return true;
     }
 
+    /**
+     * Pre-process image and calculate the CRC value.
+     *
+     * @param imageData
+     * @param image_page
+     * @param image_action
+     * @return
+     */
     public byte[] preProcessImage(byte[] imageData, int image_page, int image_action) {
         byte[] newImageData = null;
         int image_data_len = imageData.length;
@@ -277,6 +321,12 @@ public class ImageGenerator {
         return newImageData;
     }
 
+    /**
+     * Pre-process OTA package data.
+     *
+     * @param imageData
+     * @return
+     */
     public byte[] preProcessFOTAImage(byte[] imageData) {
         byte[] newImageData = null;
         int image_data_len = imageData.length;
@@ -410,7 +460,7 @@ public class ImageGenerator {
      *  CRC16-CCITT = 29b1
      *
      ******************************************************************************/
-    public int crc16CCITT(byte[] bytes) {
+    private int crc16CCITT(byte[] bytes) {
         int crc = 0x0000;          // initial value
         int polynomial = 0x1021;   // 0001 0000 0010 0001  (0, 5, 12)
 
@@ -428,6 +478,11 @@ public class ImageGenerator {
     }
 
 
+    /**
+     * Get image data or package data.
+     *
+     * @return
+     */
     public byte[] getImageData() {
         return imageData;
     }

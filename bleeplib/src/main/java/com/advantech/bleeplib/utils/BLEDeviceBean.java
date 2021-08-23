@@ -10,7 +10,13 @@ import com.advantech.bleeplib.image.ImageGenerator;
 import java.util.Map;
 import java.util.Objects;
 
-public class BLEDeviceBean {
+/**
+ * BLEDeviceBean is a java bean for internal usage.
+ *
+ * @author Fabian Chung
+ * @version 1.0.0
+ */
+class BLEDeviceBean {
     private String address; // Mac Address
     private BluetoothGatt bluetoothGatt; // BluetoothGatt 物件實體
     private Map<String, BluetoothGattCharacteristic> charMap = new ArrayMap<>(); // characteristics map
