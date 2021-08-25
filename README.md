@@ -54,6 +54,7 @@ https://github.com/fabian415/bleeplib.git
 ### Basic Usage 
 **IDE tool:** Android Studio
 **Language:** Java
+**Device:** Advantech EPD-250/EPD-252/EPD-353
 **Index:**
 Step 1 ~ 6. **BLEUtil** initilization and BLE scan
 Step 7 ~ 8. Connect to a device using **BLEUtil**
@@ -410,7 +411,6 @@ Bitmap finalBitmap = Common.rotateImage(resizeBitmap, 180);
 
 // Push Image to the device for the first page, and refreshing image immedately
 bleUtil.pushImage(mac, panelType, finalBitmap, 1, 1);
-Toast.makeText(context, "Send Image 1", Toast.LENGTH_SHORT).show();
 ```
 
 **Step 11.** We also provide a **BLETaskHandler** class to handle a bulk of pushing image tasks at one time. All you need to do is to prepare an ArrayList of device mac addresses and bitmap images, and then new BLETaskHandlers one by one in the loop, and finally start the tasks.  **BLETaskHandler** will help you to start a connection, push the image, re-try jobs if some errors occurred, and disconnet the device after this task is done.
