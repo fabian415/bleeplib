@@ -59,16 +59,11 @@ https://github.com/fabian415/bleeplib.git
 **Device:** Advantech EPD-250/EPD-252/EPD-353
 
 **Index:**
-
-Step 1 ~ 6. **BLEUtil** initilization and BLE scan
-
-Step 7 ~ 8. Connect to a device using **BLEUtil**
-
-Step 9. Send LED command
-
-Step 10. Push image command
-
-Step 11. Bulk push images by **BLETaskHandler**
+- Step 1 ~ 6. **BLEUtil** initilization and BLE scan
+- Step 7 ~ 8. Connect to a device using **BLEUtil**
+- Step 9. Send LED command
+- Step 10. Push image command
+- Step 11. Bulk push images by **BLETaskHandler**
 
 **Step 1.** In your **Manifest.xml**, you must add the user-permission for the usage of bluetooth resource.
 
