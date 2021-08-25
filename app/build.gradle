@@ -37,6 +37,6 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
     // test library
-    implementation project(path: ':bleeplib')
-//    implementation 'com.github.fabian415:bleeplib:1.0.0'
+//    implementation project(path: ':bleeplib')
+    implementation 'com.github.fabian415:bleeplib:1.1.0'
 }

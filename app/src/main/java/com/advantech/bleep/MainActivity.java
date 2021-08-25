@@ -188,10 +188,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private BLEScanListener bleScanListener = new BLEScanListener() {
-        // 設備掃描後的結果
+        // Scan results
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
-            // 去除非研華設備
+            // Remove the non-Advantech devices
             if (device.getName() == null || device.getName().indexOf("Advantech_") == -1) return;
 
             // Parse Manufacturer Data
@@ -221,7 +221,7 @@ public class MainActivity extends AppCompatActivity {
             refreshDeviceAdapterUI(); // trigger UI changed
         }
 
-        // 掃描狀態改變
+        // Scan status changed
         @Override
         public void onScanStatusChanged(boolean isScanning) {
             Log.i(TAG, String.format("isScan: %s", isScanning));
@@ -401,7 +401,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 向使用者要求權限
+    // Ask permissions from user
     private void askPermissions() {
         String[] permissions = {
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -420,7 +420,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 向使用者要求權限的回調函式
+    // Ask permissions callback
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
