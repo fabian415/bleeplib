@@ -6,7 +6,7 @@ This is an Android BLE library for communication with Advantech ePaper (EPD) dev
 ### Gradle
 **Step 1.** Add the JitPack repository to your build file. 
 Add it in your root build.gradle at the end of repositories:
-```java=
+```java
 allprojects {
     repositories {
         ...
@@ -17,7 +17,7 @@ allprojects {
 
 **Step 2.** Add the dependency. 
 [Tag] must be replaced as the specific version, such as [1.1.0].
-```java=
+```java
 dependencies {
     implementation 'com.github.fabian415:bleeplib:Tag'
 }
@@ -25,7 +25,7 @@ dependencies {
 
 ### Maven
 **Step 1.** Add the JitPack repository to your build file.
-```xml=
+```xml
 <repositories>
     <repository>
         <id>jitpack.io</id>
@@ -36,7 +36,7 @@ dependencies {
 
 **Step 2.** Add the dependency. 
 [Tag] must be replaced as the specific version, such as [1.1.0].
-```xml=
+```xml
 <dependency>
     <groupId>com.github.fabian415</groupId>
     <artifactId>bleeplib</artifactId>
@@ -68,7 +68,7 @@ https://github.com/fabian415/bleeplib.git
 **Step 1.** In your **Manifest.xml**, you must add the user-permission for the usage of bluetooth resource.
 
 Manifest.xml
-```xml=
+```xml
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.advantech.bleep">
@@ -158,7 +158,7 @@ public void onRequestPermissionsResult(int requestCode, @NonNull String[] permis
 **Step 3.** On the **onCreate** method of **MainActivity**, register a BLE scanning listener after the BLEUtil utility initialization.
 
 MainActivity.java
-```java=
+```java
 ...
 private BLEUtil bleUtil = BLEUtil.getInstance();
 ...
@@ -200,7 +200,7 @@ private BLEScanListener bleScanListener = new BLEScanListener() {
 **Step 4.** On the **onResume** method of **MainActivity**, use **isValid** method to double check if the user disable the bluetooth function when the App is resumed.
 
 MainActivity.java
-```java=
+```java
 @Override
 protected void onResume() {
     super.onResume();
@@ -226,7 +226,7 @@ public void onActivityResult(int requestCode, int resultCode, @Nullable Intent d
 **Step 5.** Start BLE scan. You can pass the time parameter (unit: seconds) to stop the scan after defined seconds or pass -1 for endless scaning.
 
 MainActivity.java
-```java=
+```java
 private void startScan() {
     bleUtil.startScan(60); // (Unit: Seconds)
     ...
@@ -236,7 +236,7 @@ private void startScan() {
 **Step 6.** Stop BLE scan. Tips: In order to save power, on the **onStop** method of **MainActivity** to stop BLE scan in case the user forget to stop after the app is paused.  
 
 MainActivity.java
-```java=
+```java
 private void stopScan() {
     bleUtil.stopScan();
     ...
@@ -253,7 +253,7 @@ protected void onPause() {
 **Step 7.** Connect a device. On the **onResume** method of **DeviceActivity**, add a BLE connection listener and connect a device using its mac address. If connection is successful, you will see the logs on the **onConnectionStateChange** method. Tips: Make sure to stop BLE scan before connect to a device.
 
 DeviceActivity.java
-```java=
+```java
 @Override
 protected void onResume() {
     super.onResume();
@@ -372,7 +372,7 @@ private BLEConnectListener bleConnectListener = new BLEConnectListener() {
 **Step 8.** Disconnect a device. On the **onPause** method of **DeviceActivity**, remove the connection listener and disconnect a device using its mac address.
 
 DeviceActivity.java
-```java=
+```java
 @Override
 protected void onPause() {
     super.onPause();
@@ -385,7 +385,7 @@ protected void onPause() {
 
 **Step 9.** Send LED command. After BLE connection, you can easily open or close LED ligths by **writeLED**x methods.
 
-```java=
+```java
 ...
 // Open LED1
 bleUtil.writeLED1(mac, true);
@@ -398,7 +398,7 @@ bleUtil.writeLED(mac, true, false, true);
 
 **Step 10.** Push image command. After BLE connection, you can push image to the device by the **pushImage** method. Make sure change your image file to a **bitmap** format, and resize to fit the panel-type of the EPD device, and rotate the image for 180 degrees.
 
-```java=
+```java
 // device name to panel-type
 PanelType panelType = Common.getPanelTypeByName(deviceName);
 
@@ -419,7 +419,7 @@ bleUtil.pushImage(mac, panelType, finalBitmap, 1, 1);
 **Step 11.** We also provide a **BLETaskHandler** class to handle a bulk of pushing image tasks at one time. All you need to do is to prepare an ArrayList of device mac addresses and bitmap images, and then new BLETaskHandlers one by one in the loop, and finally start the tasks.  **BLETaskHandler** will help you to start a connection, push the image, re-try jobs if some errors occurred, and disconnet the device after this task is done.
 
 MainActivity.java
-```java=
+```java
 for (String mac : selectDevices.keySet()) {
     Device d = selectDevices.get(mac);
     
