@@ -92,7 +92,7 @@ Manifest.xml
 **Step 2.** On the **onCreate** method of **MainActivity**, ask the permissions about access files and location from users and initial the **BLEUtil** utility using Activity context.
 
 MainActivity.java
-```java=
+```java
 ...
 private BLEUtil bleUtil = BLEUtil.getInstance();
 ...
