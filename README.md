@@ -1,7 +1,7 @@
 # bleeplib
 
 ### Overview
-This is an Android BLE library for communication with Advantech ePaper (EPD) devices.
+This is an Android BLE library which can communicate with Advantech ePaper (EPD) devices.
 
 ### Gradle
 **Step 1.** Add the JitPack repository to your build file. 
@@ -183,6 +183,7 @@ private BLEScanListener bleScanListener = new BLEScanListener() {
         // Parse Manufacturer Data
         byte[] data = Common.parseManufacturerData(scanRecord);
         if (data == null) return;
+        String hexStr = byteArrayToHexStr(data);
 
         String macAddress = device.getAddress();
         String name = device.getName();
