@@ -9,8 +9,13 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -55,6 +60,7 @@ public class BLEUtil {
     private static BLEUtil instance = null;
     private BluetoothManager bluetoothManager;
     private BluetoothAdapter bluetoothAdapter;
+    private BluetoothLeScanner bluetoothLeScanner;
     private List<BLEScanListener> bleScanListeners = new ArrayList<>();
     private Map<String, BLEDeviceBean> connectionQueue = new ConcurrentHashMap<>();
     private Map<String, BLEConnectListener> bleConnectListeners = new ConcurrentHashMap<>(); // mac, listener
@@ -107,7 +113,8 @@ public class BLEUtil {
         this.context = context;
         bluetoothManager = (BluetoothManager) context.getSystemService(BLUETOOTH_SERVICE);
         bluetoothAdapter = bluetoothManager.getAdapter();
-        mHandler = new Handler();
+        bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+        mHandler = new Handler(Looper.getMainLooper());
         return bluetoothAdapter != null;
     }
 
@@ -128,7 +135,7 @@ public class BLEUtil {
             mHandler.postDelayed(myRunnable, scanTime * 1000);
         }
         // 開始搜尋 BLE 設備
-        bluetoothAdapter.startLeScan(leScanCallback);
+        bluetoothLeScanner.startScan(null, createScanSetting(), leScanCallback);
         isScanning = true;
         Log.d(TAG, "Start Scan");
         // notify clients
@@ -144,7 +151,7 @@ public class BLEUtil {
      */
     public void stopScan() {
         // 停止搜尋
-        bluetoothAdapter.stopLeScan(leScanCallback);
+        bluetoothLeScanner.stopScan(leScanCallback);
         isScanning = false;
         Log.d(TAG, "Stop Scan");
         mHandler.removeCallbacks(myRunnable);
@@ -154,6 +161,19 @@ public class BLEUtil {
         }
     }
 
+    private ScanSettings createScanSetting() {
+        ScanSettings.Builder builder = new ScanSettings.Builder();
+        // SCAN_MODE_LOW_POWER: 耗電最少，掃描時間間隔最短
+        // SCAN_MODE_BALANCED: 平衡模式，耗電適中，掃描時間間隔一般，我使用這種模式來更新裝置狀態
+        // SCAN_MODE_LOW_LATENCY: 最耗電，掃描延遲時間短，開啟掃描需要立馬返回結果可以使用
+        builder.setScanMode(ScanSettings.SCAN_MODE_BALANCED);
+        // builder.setReportDelay(100); // 設定掃描返回延遲時間，一般是大於零的毫秒值
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            builder.setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES);
+        }
+        return builder.build();
+    }
+
     private Runnable myRunnable = new Runnable() {
         @Override
         public void run() {
@@ -161,13 +181,27 @@ public class BLEUtil {
         }
     };
 
-    private BluetoothAdapter.LeScanCallback leScanCallback = new BluetoothAdapter.LeScanCallback() {
+    private ScanCallback leScanCallback = new ScanCallback() {
         @Override
-        public void onLeScan(final BluetoothDevice device, final int rssi, byte[] scanRecord) {
+        public void onScanResult(int callbackType, ScanResult result) {
+            BluetoothDevice device = result.getDevice();
+            int rssi = result.getRssi();
+            byte[] scanRecord = result.getScanRecord().getBytes();
+
             // notify clients
             for (BLEScanListener bleScanListener : bleScanListeners) {
                 bleScanListener.onLeScan(device, rssi, scanRecord);
             }
+        }
+
+        @Override
+        public void onBatchScanResults(List<ScanResult> results) {
+            super.onBatchScanResults(results);
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            super.onScanFailed(errorCode);
         }
     };
 
@@ -1142,6 +1176,7 @@ public class BLEUtil {
         boolean result = false;
         if (gattCharacteristic != null) {
             gattCharacteristic.setValue(data);
+            gattCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
             result = gatt.writeCharacteristic(gattCharacteristic);
         }
         return result;

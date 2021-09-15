@@ -3,6 +3,7 @@ package com.advantech.bleeplib.utils;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.ArrayMap;
 
 import com.advantech.bleeplib.image.ImageGenerator;
@@ -40,8 +41,8 @@ class BLEDeviceBean {
         this.address = address;
         this.bluetoothGatt = bluetoothGatt;
         this.timeoutCallback = timeoutCallback;
-        taskTimeoutHandler = new Handler();
-        connTimeoutHandler = new Handler();
+        taskTimeoutHandler = new Handler(Looper.getMainLooper());
+        connTimeoutHandler = new Handler(Looper.getMainLooper());
     }
 
     // Task Timer --- START

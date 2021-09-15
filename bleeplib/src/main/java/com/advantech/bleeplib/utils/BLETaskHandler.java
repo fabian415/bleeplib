@@ -169,6 +169,10 @@ public class BLETaskHandler {
                 }
                 // 解除工作狀態
                 isTaskExecuting = false;
+                // Device disconnect
+                if(autoDisconnect) {
+                    disconnect();
+                }
                 result = true;
             } else {
                 result = bleUtil.firmwareUpgrade(deviceMac, packageData);
