@@ -190,7 +190,11 @@ public class BLETaskHandler {
         }
         if (!result) {
             if (bleTaskHandlerCallback != null)
-                bleTaskHandlerCallback.onError("Task Existed!");
+                bleTaskHandlerCallback.onError("Task Existed / Image not valid");
+            // Device disconnect
+            if(autoDisconnect) {
+                disconnect();
+            }
         }
     }
 
